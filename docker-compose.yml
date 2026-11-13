@@ -18,5 +18,16 @@ services:
       timeout: 5s
       retries: 15
 
+  mcp:
+    build: .
+    environment:
+      DATABASE_URL_READ: postgresql+asyncpg://support_read:${SUPPORT_READ_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL_WRITE: postgresql+asyncpg://support_write:${SUPPORT_WRITE_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:

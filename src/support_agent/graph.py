@@ -5,15 +5,16 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AnyMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from mcp import Client
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
-from support_agent import tools
 
 MODEL = "claude-haiku-5-5"
 MODEL_TIMEOUT_S = 30
 MODEL_MAX_RETRIES = 2
 MAX_TOKENS = 1024
 MAX_STEPS = 12
+MCP_URL = "http://127.0.0.1:8000/mcp"
+MCP_TIMEOUT_S = 10
 
 SYSTEM_PROMPT = """You are the customer support agent for a small online store.
 You help the signed-in customer with their own orders. Use the tools to look up
@@ -54,11 +55,7 @@ class IssueRefund(BaseModel):
     reason: str = Field(description="Why the customer wants the refund.")
 
 
-TOOLS = {
-    "get_order": (GetOrder, tools.get_order),
-    "list_orders": (ListOrders, tools.list_orders),
-    "issue_refund": (IssueRefund, tools.issue_refund),
-}
+TOOLS = {"get_order": GetOrder, "list_orders": ListOrders, "issue_refund": IssueRefund}
 
 
 class State(TypedDict):
@@ -73,33 +70,38 @@ def make_model():
         max_retries=MODEL_MAX_RETRIES,
         max_tokens=MAX_TOKENS,
     )
-    return model.bind_tools([schema for schema, _ in TOOLS.values()])
+    return model.bind_tools(list(TOOLS.values()))
 
 
-def build_graph(model):
+def build_graph(model, mcp_server=MCP_URL):
     async def agent(state: State) -> dict:
         reply = await model.ainvoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
         return {"messages": [reply]}
 
     async def run_tools(state: State) -> dict:
         results = []
-        for call in state["messages"][-1].tool_calls:
-            try:
-                schema, fn = TOOLS[call["name"]]
-                args = schema.model_validate(call["args"]).model_dump()
-            except (KeyError, ValidationError) as exc:
-                content, status = f"Invalid tool call: {exc}", "error"
-            else:
-                output = await fn(state["customer_id"], **args)
-                content, status = json.dumps(output), "success"
-            results.append(
-                ToolMessage(
-                    content=content,
-                    tool_call_id=call["id"],
-                    name=call["name"],
-                    status=status,
+        async with Client(mcp_server, read_timeout_seconds=MCP_TIMEOUT_S) as client:
+            for call in state["messages"][-1].tool_calls:
+                try:
+                    args = TOOLS[call["name"]].model_validate(call["args"]).model_dump()
+                except (KeyError, ValidationError) as exc:
+                    content, status = f"Invalid tool call: {exc}", "error"
+                else:
+                    args["customer_id"] = state["customer_id"]
+                    result = await client.call_tool(call["name"], args)
+                    if result.is_error:
+                        content, status = result.content[0].text, "error"
+                    else:
+                        content = json.dumps(result.structured_content)
+                        status = "success"
+                results.append(
+                    ToolMessage(
+                        content=content,
+                        tool_call_id=call["id"],
+                        name=call["name"],
+                        status=status,
+                    )
                 )
-            )
         return {"messages": results}
 
     def route(state: State) -> str:

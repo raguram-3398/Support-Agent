@@ -8,6 +8,8 @@ dependencies = [
     "langgraph==1.2.20",
     "langchain-anthropic==1.7.10",
     "langfuse==5.2.0",
+    "mcp==2.3.0",
+    "uvicorn==0.54.0",
 ]
 
 [dependency-groups]
