@@ -1,10 +1,12 @@
 import json
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import AnyMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
+from langgraph.errors import NodeError, NodeTimeoutError
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.types import Command, interrupt
 from mcp import Client
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -15,6 +17,13 @@ MAX_TOKENS = 1024
 MAX_STEPS = 12
 MCP_URL = "http://127.0.0.1:8000/mcp"
 MCP_TIMEOUT_S = 10
+AGENT_NODE_TIMEOUT_S = 45
+TOOLS_NODE_TIMEOUT_S = 8
+REFUND_APPROVAL_CENTS = 10_000
+
+AGENT_TIMEOUT_REPLY = "Sorry, that took too long. Please try again."
+TOOLS_TIMEOUT_RESULT = "Tool timed out. It may or may not have run."
+REJECTED_RESULT = "Not run: a reviewer rejected the refund."
 
 SYSTEM_PROMPT = """You are the customer support agent for a small online store.
 You help the signed-in customer with their own orders. Use the tools to look up
@@ -73,10 +82,49 @@ def make_model():
     return model.bind_tools(list(TOOLS.values()))
 
 
-def build_graph(model, mcp_server=MCP_URL):
+def _reply_to_every_call(state: State, content: str) -> list[ToolMessage]:
+    return [
+        ToolMessage(
+            content=content, tool_call_id=call["id"], name=call["name"], status="error"
+        )
+        for call in state["messages"][-1].tool_calls
+    ]
+
+
+def build_graph(model, checkpointer, mcp_server=MCP_URL):
     async def agent(state: State) -> dict:
         reply = await model.ainvoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
         return {"messages": [reply]}
+
+    async def approval(state: State) -> Command[Literal["tools", "agent"]]:
+        refund_ids = []
+        for call in state["messages"][-1].tool_calls:
+            if call["name"] == "issue_refund":
+                try:
+                    refund_ids.append(IssueRefund.model_validate(call["args"]).order_id)
+                except ValidationError:
+                    pass
+        large = []
+        if refund_ids:
+            async with Client(mcp_server, read_timeout_seconds=MCP_TIMEOUT_S) as client:
+                for order_id in refund_ids:
+                    result = await client.call_tool(
+                        "get_order",
+                        {"customer_id": state["customer_id"], "order_id": order_id},
+                    )
+                    if result.is_error:
+                        continue
+                    order = result.structured_content["result"]
+                    if order and order["total_cents"] > REFUND_APPROVAL_CENTS:
+                        large.append(
+                            {"order_id": order_id, "total_cents": order["total_cents"]}
+                        )
+        if not large or interrupt({"refunds": large}):
+            return Command(goto="tools")
+        return Command(
+            goto="agent",
+            update={"messages": _reply_to_every_call(state, REJECTED_RESULT)},
+        )
 
     async def run_tools(state: State) -> dict:
         results = []
@@ -104,13 +152,31 @@ def build_graph(model, mcp_server=MCP_URL):
                 )
         return {"messages": results}
 
+    def agent_failed(state: State, error: NodeError) -> Command[Literal["__end__"]]:
+        if not isinstance(error.error, NodeTimeoutError):
+            raise error.error
+        return Command(goto=END, update={"messages": [AIMessage(AGENT_TIMEOUT_REPLY)]})
+
+    def tools_failed(state: State, error: NodeError) -> Command[Literal["agent"]]:
+        if not isinstance(error.error, NodeTimeoutError):
+            raise error.error
+        return Command(
+            goto="agent",
+            update={"messages": _reply_to_every_call(state, TOOLS_TIMEOUT_RESULT)},
+        )
+
     def route(state: State) -> str:
-        return "tools" if state["messages"][-1].tool_calls else END
+        return "approval" if state["messages"][-1].tool_calls else END
 
     graph = StateGraph(State)
-    graph.add_node("agent", agent)
-    graph.add_node("tools", run_tools)
+    graph.add_node(
+        "agent", agent, timeout=AGENT_NODE_TIMEOUT_S, error_handler=agent_failed
+    )
+    graph.add_node("approval", approval)
+    graph.add_node(
+        "tools", run_tools, timeout=TOOLS_NODE_TIMEOUT_S, error_handler=tools_failed
+    )
     graph.add_edge(START, "agent")
-    graph.add_conditional_edges("agent", route, ["tools", END])
+    graph.add_conditional_edges("agent", route, ["approval", END])
     graph.add_edge("tools", "agent")
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)

@@ -4,20 +4,28 @@ import asyncio
 from langchain_core.messages import HumanMessage
 from langfuse import get_client
 from langfuse.langchain import CallbackHandler
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphRecursionError
 
 from support_agent.graph import MAX_STEPS, build_graph, make_model
 
 
 async def main(customer_id: int, question: str) -> None:
-    graph = build_graph(make_model())
-    config = {"recursion_limit": MAX_STEPS, "callbacks": [CallbackHandler()]}
+    graph = build_graph(make_model(), InMemorySaver())
+    config = {
+        "configurable": {"thread_id": "ask"},
+        "recursion_limit": MAX_STEPS,
+        "callbacks": [CallbackHandler()],
+    }
     try:
         result = await graph.ainvoke(
             {"messages": [HumanMessage(question)], "customer_id": customer_id},
             config,
         )
-        print(result["messages"][-1].text)
+        if "__interrupt__" in result:
+            print("Paused for approval:", result["__interrupt__"][0].value)
+        else:
+            print(result["messages"][-1].text)
     except GraphRecursionError:
         print(f"Stopped: step cap of {MAX_STEPS} reached.")
     finally:
