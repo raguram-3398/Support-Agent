@@ -1,0 +1,127 @@
+{
+  "multi-mixed": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "multi-which-refundable": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "multi-both-delivered": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "multi-most-recent-delivered": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "deny-partial": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "deny-other-customer": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "deny-already-refunded": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "deny-cancelled": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "deny-placed": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "deny-shipped": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "refund-large-rejected-never-worked": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "refund-large-defective": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "refund-large-rejected": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "refund-large-approved": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "refund-no-reason": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "refund-small-by-amount": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "refund-small-size": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "refund-small-broken": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "lookup-refunded": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "lookup-other-customer": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "lookup-cancelled": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "lookup-no-number": {
+    "db_state": true,
+    "tools": false,
+    "judge": false
+  },
+  "lookup-list": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "lookup-total": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "lookup-shipped": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  }
+}

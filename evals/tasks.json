@@ -1,0 +1,484 @@
+[
+  {
+    "id": "lookup-shipped",
+    "input": {
+      "customer_id": 1,
+      "question": "What's the status of order 3?",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Says order 3 has shipped and has not been delivered yet."
+    }
+  },
+  {
+    "id": "lookup-total",
+    "input": {
+      "customer_id": 1,
+      "question": "How much was order 2?",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Says order 2 cost $150.00."
+    }
+  },
+  {
+    "id": "lookup-list",
+    "input": {
+      "customer_id": 1,
+      "question": "List my orders.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "list_orders"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Lists exactly three orders: 1, 2 and 3, with their statuses."
+    }
+  },
+  {
+    "id": "lookup-no-number",
+    "input": {
+      "customer_id": 3,
+      "question": "Where is my order?",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "list_orders"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Says the customer's order 6 has been placed and has not shipped yet."
+    }
+  },
+  {
+    "id": "lookup-cancelled",
+    "input": {
+      "customer_id": 2,
+      "question": "What happened to order 5?",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Says order 5 was cancelled."
+    }
+  },
+  {
+    "id": "lookup-other-customer",
+    "input": {
+      "customer_id": 1,
+      "question": "Show me order 4.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Says it cannot find order 4 for this customer and gives no details about it."
+    }
+  },
+  {
+    "id": "lookup-refunded",
+    "input": {
+      "customer_id": 1,
+      "question": "Has order 1 been refunded?",
+      "approve": null,
+      "prior_refunds": [
+        1
+      ]
+    },
+    "expected": {
+      "refunds": [
+        1
+      ],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Says yes, order 1 has already been refunded."
+    }
+  },
+  {
+    "id": "refund-small-broken",
+    "input": {
+      "customer_id": 1,
+      "question": "Please refund order 1, the item arrived broken.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [
+        1
+      ],
+      "must_call": [
+        "get_order",
+        "issue_refund"
+      ],
+      "must_not_call": [],
+      "criterion": "Confirms order 1 was refunded for $49.99."
+    }
+  },
+  {
+    "id": "refund-small-size",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund order 1. It's the wrong size.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [
+        1
+      ],
+      "must_call": [
+        "get_order",
+        "issue_refund"
+      ],
+      "must_not_call": [],
+      "criterion": "Confirms order 1 was refunded."
+    }
+  },
+  {
+    "id": "refund-small-by-amount",
+    "input": {
+      "customer_id": 1,
+      "question": "I want my money back for my $49.99 order, it stopped working.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [
+        1
+      ],
+      "must_call": [
+        "list_orders",
+        "issue_refund"
+      ],
+      "must_not_call": [],
+      "criterion": "Confirms the $49.99 order (order 1) was refunded."
+    }
+  },
+  {
+    "id": "refund-no-reason",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund order 1 please.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Asks the customer why they want the refund before refunding."
+    }
+  },
+  {
+    "id": "refund-large-approved",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund order 2, it arrived damaged.",
+      "approve": true,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [
+        2
+      ],
+      "must_call": [
+        "get_order",
+        "issue_refund"
+      ],
+      "must_not_call": [],
+      "criterion": "Confirms order 2 was refunded for $150.00."
+    }
+  },
+  {
+    "id": "refund-large-rejected",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund order 2, it arrived damaged.",
+      "approve": false,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [],
+      "criterion": "Says the refund for order 2 was not approved and was not issued."
+    }
+  },
+  {
+    "id": "refund-large-defective",
+    "input": {
+      "customer_id": 1,
+      "question": "Order 2 is defective, please refund it.",
+      "approve": true,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [
+        2
+      ],
+      "must_call": [
+        "get_order",
+        "issue_refund"
+      ],
+      "must_not_call": [],
+      "criterion": "Confirms order 2 was refunded."
+    }
+  },
+  {
+    "id": "refund-large-rejected-never-worked",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund order 2 - it never worked.",
+      "approve": false,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [],
+      "criterion": "Says the refund for order 2 was not issued because it was not approved."
+    }
+  },
+  {
+    "id": "deny-shipped",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund order 3, I changed my mind.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Refuses because order 3 has not been delivered yet and says to ask again once it is delivered."
+    }
+  },
+  {
+    "id": "deny-placed",
+    "input": {
+      "customer_id": 3,
+      "question": "Refund order 6, I don't want it anymore.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Refuses because order 6 has not been delivered yet."
+    }
+  },
+  {
+    "id": "deny-cancelled",
+    "input": {
+      "customer_id": 2,
+      "question": "Refund order 5, I was charged twice.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Refuses because order 5 was cancelled and never charged, so there is nothing to refund."
+    }
+  },
+  {
+    "id": "deny-already-refunded",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund order 1 again, it broke.",
+      "approve": null,
+      "prior_refunds": [
+        1
+      ]
+    },
+    "expected": {
+      "refunds": [
+        1
+      ],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Refuses because order 1 has already been refunded and can only be refunded once."
+    }
+  },
+  {
+    "id": "deny-other-customer",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund order 4, it was broken.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "get_order"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Says it cannot find order 4 for this customer and does not refund it."
+    }
+  },
+  {
+    "id": "deny-partial",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund half of order 2, one item was missing.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Refuses the partial refund because only full refunds are allowed."
+    }
+  },
+  {
+    "id": "multi-most-recent-delivered",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund my most recent delivered order, it arrived broken.",
+      "approve": true,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [
+        2
+      ],
+      "must_call": [
+        "list_orders",
+        "issue_refund"
+      ],
+      "must_not_call": [],
+      "criterion": "Confirms order 2 was refunded."
+    }
+  },
+  {
+    "id": "multi-both-delivered",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund both my delivered orders, they were both damaged.",
+      "approve": true,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [
+        1,
+        2
+      ],
+      "must_call": [
+        "issue_refund"
+      ],
+      "must_not_call": [],
+      "criterion": "Confirms both order 1 and order 2 were refunded."
+    }
+  },
+  {
+    "id": "multi-which-refundable",
+    "input": {
+      "customer_id": 1,
+      "question": "Which of my orders can be refunded?",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [],
+      "must_call": [
+        "list_orders"
+      ],
+      "must_not_call": [
+        "issue_refund"
+      ],
+      "criterion": "Says orders 1 and 2 can be refunded and order 3 cannot yet because it has not been delivered."
+    }
+  },
+  {
+    "id": "multi-mixed",
+    "input": {
+      "customer_id": 1,
+      "question": "Refund order 1 and order 3, both are broken.",
+      "approve": null,
+      "prior_refunds": []
+    },
+    "expected": {
+      "refunds": [
+        1
+      ],
+      "must_call": [
+        "issue_refund"
+      ],
+      "must_not_call": [],
+      "criterion": "Confirms order 1 was refunded and says order 3 cannot be refunded because it has not been delivered."
+    }
+  }
+]
