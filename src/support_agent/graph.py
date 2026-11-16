@@ -1,6 +1,9 @@
 import json
+import os
+from contextlib import asynccontextmanager
 from typing import Annotated, Literal, TypedDict
 
+import httpx2
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
 from langgraph.errors import NodeError, NodeTimeoutError
@@ -8,7 +11,13 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import Command, interrupt
 from mcp import Client
+from mcp.client.auth.extensions.client_credentials import (
+    ClientCredentialsOAuthProvider,
+)
+from mcp.client.streamable_http import streamable_http_client
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from support_agent.auth import ISSUER
 
 MODEL = "claude-haiku-5-5"
 MODEL_TIMEOUT_S = 30
@@ -17,6 +26,7 @@ MAX_TOKENS = 1024
 MAX_STEPS = 12
 MCP_URL = "http://127.0.0.1:8000/mcp"
 MCP_TIMEOUT_S = 10
+AGENT_CLIENT_ID = "support-agent"
 AGENT_NODE_TIMEOUT_S = 45
 TOOLS_NODE_TIMEOUT_S = 8
 REFUND_APPROVAL_CENTS = 10_000
@@ -91,7 +101,48 @@ def _reply_to_every_call(state: State, content: str) -> list[ToolMessage]:
     ]
 
 
+class TokenStore:
+    def __init__(self):
+        self.tokens = None
+        self.client_info = None
+
+    async def get_tokens(self):
+        return self.tokens
+
+    async def set_tokens(self, tokens):
+        self.tokens = tokens
+
+    async def get_client_info(self):
+        return self.client_info
+
+    async def set_client_info(self, client_info):
+        self.client_info = client_info
+
+
+def agent_auth() -> ClientCredentialsOAuthProvider:
+    return ClientCredentialsOAuthProvider(
+        server_url=MCP_URL,
+        storage=TokenStore(),
+        client_id=AGENT_CLIENT_ID,
+        client_secret=os.environ["AGENT_CLIENT_SECRET"],
+        issuer=ISSUER,
+    )
+
+
 def build_graph(model, checkpointer, mcp_server=MCP_URL):
+    auth = agent_auth() if isinstance(mcp_server, str) else None
+
+    @asynccontextmanager
+    async def connect():
+        if auth is None:
+            async with Client(mcp_server, read_timeout_seconds=MCP_TIMEOUT_S) as client:
+                yield client
+            return
+        async with httpx2.AsyncClient(auth=auth, timeout=MCP_TIMEOUT_S) as http:
+            transport = streamable_http_client(mcp_server, http_client=http)
+            async with Client(transport, read_timeout_seconds=MCP_TIMEOUT_S) as client:
+                yield client
+
     async def agent(state: State) -> dict:
         reply = await model.ainvoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
         return {"messages": [reply]}
@@ -106,7 +157,7 @@ def build_graph(model, checkpointer, mcp_server=MCP_URL):
                     pass
         large = []
         if refund_ids:
-            async with Client(mcp_server, read_timeout_seconds=MCP_TIMEOUT_S) as client:
+            async with connect() as client:
                 for order_id in refund_ids:
                     result = await client.call_tool(
                         "get_order",
@@ -128,7 +179,7 @@ def build_graph(model, checkpointer, mcp_server=MCP_URL):
 
     async def run_tools(state: State) -> dict:
         results = []
-        async with Client(mcp_server, read_timeout_seconds=MCP_TIMEOUT_S) as client:
+        async with connect() as client:
             for call in state["messages"][-1].tool_calls:
                 try:
                     args = TOOLS[call["name"]].model_validate(call["args"]).model_dump()
