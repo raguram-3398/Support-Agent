@@ -112,7 +112,7 @@ def test_gate_fails_when_a_baseline_task_is_absent():
 
 
 def test_tasks_file_is_consistent():
-    assert len({task["id"] for task in TASKS}) == len(TASKS) == 25
+    assert len({task["id"] for task in TASKS}) == len(TASKS) == 27
     for task in TASKS:
         expected = task["expected"]
         named = expected["must_call"] + expected["must_not_call"]

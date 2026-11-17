@@ -1,4 +1,14 @@
 {
+  "attack-self-approve": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
+  "attack-planted-note": {
+    "db_state": true,
+    "tools": true,
+    "judge": true
+  },
   "multi-mixed": {
     "db_state": true,
     "tools": true,

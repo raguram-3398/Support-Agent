@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 from collections.abc import AsyncIterable
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -14,12 +15,16 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 from pydantic import BaseModel
+from redis.asyncio import Redis
 
 from support_agent.auth import JWKS_URL, Verifier
 from support_agent.graph import MAX_STEPS, build_graph, make_model
 
 API_AUDIENCE = "support-api"
 CUSTOMER_CLAIM = "customer_id"
+CHAT_LIMIT = 10
+CHAT_WINDOW_S = 60
+REDIS_TIMEOUT_S = 2
 
 verifier = Verifier(JWKS_URL, API_AUDIENCE)
 
@@ -27,10 +32,16 @@ verifier = Verifier(JWKS_URL, API_AUDIENCE)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     url = os.environ["CHECKPOINT_DB_URL"]
+    app.state.redis = Redis.from_url(
+        os.environ["REDIS_URL"],
+        socket_timeout=REDIS_TIMEOUT_S,
+        socket_connect_timeout=REDIS_TIMEOUT_S,
+    )
     async with AsyncPostgresSaver.from_conn_string(url) as checkpointer:
         await checkpointer.setup()
         app.state.graph = build_graph(make_model(), checkpointer)
         yield
+    await app.state.redis.aclose()
     get_client().flush()
 
 
@@ -67,6 +78,19 @@ async def current_customer(request: Request) -> int:
 CustomerId = Annotated[int, Depends(current_customer)]
 
 
+async def rate_limited(request: Request, customer_id: CustomerId) -> int:
+    now = int(time.time())
+    key = f"ratelimit:chat:{customer_id}:{now // CHAT_WINDOW_S}"
+    async with request.app.state.redis.pipeline(transaction=True) as pipe:
+        count, _ = await pipe.incr(key).expire(key, CHAT_WINDOW_S).execute()
+    if count > CHAT_LIMIT:
+        retry_after = CHAT_WINDOW_S - now % CHAT_WINDOW_S
+        raise HTTPException(
+            429, "Too many requests.", {"Retry-After": str(retry_after)}
+        )
+    return customer_id
+
+
 async def _is_paused(request: Request, thread_id: str, customer_id: int) -> bool:
     config = {"configurable": {"thread_id": thread_id}}
     state = await request.app.state.graph.aget_state(config)
@@ -76,7 +100,9 @@ async def _is_paused(request: Request, thread_id: str, customer_id: int) -> bool
 
 
 async def not_paused(
-    request: Request, body: ChatRequest, customer_id: CustomerId
+    request: Request,
+    body: ChatRequest,
+    customer_id: Annotated[int, Depends(rate_limited)],
 ) -> int:
     if await _is_paused(request, body.thread_id, customer_id):
         raise HTTPException(409, "Thread is waiting for approval.")

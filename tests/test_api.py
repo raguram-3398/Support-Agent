@@ -1,16 +1,24 @@
 import json
+import os
 
 import httpx
 import pytest
 from conftest import make_token, serve_test_jwks
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
+from redis.asyncio import Redis
 
 from support_agent import api
 from support_agent.api import API_AUDIENCE, app
 from support_agent.graph import build_graph
 
 ALICE, BOB, LARGE_ORDER = 1, 2, 2
+TEST_LIMIT = 2
+TEST_WINDOW_S = 3600
+
+needs_redis = pytest.mark.skipif(
+    os.environ.get("CI_SKIP_DB") == "1", reason="no Redis in CI"
+)
 
 
 def auth(customer_id: int) -> dict:
@@ -39,12 +47,31 @@ LARGE_REFUND = AIMessage(
 
 
 @pytest.fixture
-def client(fake_mcp, monkeypatch):
+def limited_client(fake_mcp, monkeypatch):
     serve_test_jwks(monkeypatch, api.verifier)
     model = ScriptedModel([LARGE_REFUND, AIMessage("refunded")])
     app.state.graph = build_graph(model, InMemorySaver(), fake_mcp[0])
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://api")
+
+
+@pytest.fixture
+def client(limited_client):
+    app.dependency_overrides[api.rate_limited] = api.current_customer
+    yield limited_client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def redis(monkeypatch):
+    monkeypatch.setattr(api, "CHAT_LIMIT", TEST_LIMIT)
+    monkeypatch.setattr(api, "CHAT_WINDOW_S", TEST_WINDOW_S)
+    app.state.redis = Redis.from_url(os.environ["REDIS_URL"])
+    keys = [key async for key in app.state.redis.scan_iter("ratelimit:chat:*")]
+    if keys:
+        await app.state.redis.delete(*keys)
+    yield
+    await app.state.redis.aclose()
 
 
 def events(response: httpx.Response) -> list[tuple[str, object]]:
@@ -139,3 +166,24 @@ async def test_other_customer_cannot_use_the_thread(client, fake_mcp):
     assert chat.status_code == 404
     assert approve.status_code == 404
     assert fake_mcp[2] == []
+
+
+@needs_redis
+async def test_chat_past_the_limit_is_429(limited_client, redis):
+    async with limited_client as client:
+        first = await client.post("/chat", json=CHAT, headers=auth(ALICE))
+        second = await client.post("/chat", json=CHAT, headers=auth(ALICE))
+        third = await client.post("/chat", json=CHAT, headers=auth(ALICE))
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert third.status_code == 429
+    assert 0 < int(third.headers["retry-after"]) <= TEST_WINDOW_S
+
+
+@needs_redis
+async def test_limit_is_per_customer(limited_client, redis):
+    async with limited_client as client:
+        await client.post("/chat", json=CHAT, headers=auth(ALICE))
+        await client.post("/chat", json=CHAT, headers=auth(ALICE))
+        bob = await client.post("/chat", json=CHAT, headers=auth(BOB))
+    assert bob.status_code == 404
