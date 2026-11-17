@@ -67,7 +67,7 @@ The one failing task, `lookup-no-number` ("Where is my order?"), asks the custom
 | Mean time per task | **2.45 s** (gate run at 02:03 UTC, 81 trials; per trial 2.44 / 2.47 / 2.44 s). Agent run only: model calls, tool calls over MCP and the scripted approval; the judge is not included |
 | Claude cost per task | pending: Anthropic Console total for 2026-11-17 UTC |
 | One gate run (27 tasks × 3 trials, agent and judge) | pending: same source |
-| Tests | 69, run in CI without Postgres or Redis (those tests are skipped there) |
+| Tests | 63 passing locally with the Compose services up; CI skips the ones that need Postgres or Redis |
 
 Cost comes from the Anthropic Console, not from Langfuse. Langfuse prices calls from its own model price table, and for Haiku 5.5 its figure was higher than what the Console billed for the same day.
 
@@ -148,7 +148,7 @@ support-agent/
 │   ├── login.py                 # auth code + PKCE, prints a user token
 │   ├── ask.py                   # one question, no API
 │   └── eval_gate.py             # run the gate, or save a new baseline
-└── tests/                       # 69 tests
+└── tests/                       # 63 tests
 ```
 
 ---
@@ -160,13 +160,13 @@ Requires Docker, Python 3.12 and [uv](https://docs.astral.sh/uv/). Copy `.env.ex
 ```bash
 docker compose up -d --build
 uv sync
-uv run --env-file .env uvicorn support_agent.api:app --port 8001
+uv run --env-file .env uvicorn support_agent.api:app --host 127.0.0.1 --port 8001
 ```
 
-In another terminal, sign in as a test customer (opens Keycloak in the browser) and ask a question:
+Port 8000 is the MCP server. In another terminal, sign in as a test customer (opens Keycloak in the browser; the passwords are in `.env`) and ask a question:
 
 ```bash
-TOKEN=$(uv run python scripts/login.py)
+TOKEN=$(uv run --env-file .env python scripts/login.py)
 curl -N http://127.0.0.1:8001/chat \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"thread_id": "demo-1", "message": "Refund order 2, it arrived damaged."}'
@@ -182,7 +182,7 @@ uv run --env-file .env python scripts/eval_gate.py
 uv run --env-file .env python scripts/eval_gate.py --save-baseline
 ```
 
-**Tests:** `uv run pytest`. CI runs ruff, black and pytest on every push, with the Postgres and Redis tests skipped.
+**Tests:** `uv run --env-file .env pytest`. The tests empty the `refunds` table, so run them before a demo, not after. CI runs ruff, black and pytest on every push, with the Postgres and Redis tests skipped.
 
 ---
 
@@ -220,6 +220,7 @@ Not measured; reasoned from the code.
 - **The planted-note attack is stopped by the model, not by code.** Nothing in the code would stop the agent from refunding the customer's own eligible orders under $100 if the model followed the note.
 - **The judge is the same model as the agent.** Haiku grades Haiku. Each judge criterion was checked both ways (a wrong reply scores 0, a right one 1) on the task where it changed, not on all 27.
 - **27 tasks on one seed database.** Small, hand-written, and the eval resets the `refunds` table with an admin role, so it must never point at real data.
+- **MCP server down (not slow) breaks the thread.** A timeout is handled and the run continues; any other tool error is re-raised and leaves that thread unusable.
 - **Keycloak down returns 401, not 503.** A client cannot tell an outage from a bad token.
 - **The protected resource metadata lists only `orders:read`.** A client has to learn about `refunds:write` from the 403.
 - **The judge's calls are not traced in Langfuse**, so its cost and time are only in the Console total.
